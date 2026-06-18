@@ -1,0 +1,21 @@
+server:
+  addr: ":8080"
+mysql:
+  dsn: "rag:ragpass@tcp(127.0.0.1:3306)/ragserver?charset=utf8mb4&parseTime=True&loc=Local"
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+storage:
+  file_dir: "../storage/files"
+openai:
+  base_url: "https://api.openai.com"
+  api_key: "replace-me"
+  embedding_model: "text-embedding-3-small"
+  embedding_dimension: 1536
+auth:
+  admin_token: "replace-admin-token"
+  api_key_encryption_secret: "replace-with-32-byte-secret-value"
+mcp:
+  upload_max_mb: 20
+

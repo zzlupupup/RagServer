@@ -1,0 +1,56 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: ragserver
+      MYSQL_USER: rag
+      MYSQL_PASSWORD: ragpass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ../backend/migrations:/docker-entrypoint-initdb.d:ro
+
+  redis-stack:
+    image: redis/redis-stack-server:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  backend:
+    build:
+      context: ../backend
+    environment:
+      SERVER_ADDR: ":8080"
+      MYSQL_DSN: "rag:ragpass@tcp(mysql:3306)/ragserver?charset=utf8mb4&parseTime=True&loc=Local"
+      REDIS_ADDR: "redis-stack:6379"
+      FILE_STORAGE_DIR: "/data/files"
+      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-https://api.openai.com}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      EMBEDDING_MODEL: "${EMBEDDING_MODEL:-text-embedding-3-small}"
+      EMBEDDING_DIMENSION: "${EMBEDDING_DIMENSION:-1536}"
+      ADMIN_TOKEN: "${ADMIN_TOKEN:-dev-admin-token}"
+      API_KEY_ENCRYPTION_SECRET: "${API_KEY_ENCRYPTION_SECRET:-change-me-in-production}"
+      MCP_UPLOAD_MAX_MB: "20"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../storage/files:/data/files
+    depends_on:
+      - mysql
+      - redis-stack
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  mysql-data:
+  redis-data:
