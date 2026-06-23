@@ -1,9 +1,11 @@
 services:
   mysql:
     image: mysql
+    networks:
+      - ragserver-net
     environment:
       MYSQL_DATABASE: ragserver
-      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-rootpass}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
       MYSQL_USER: rag
       MYSQL_PASSWORD: ragpass
     ports:
@@ -21,10 +23,11 @@ services:
   redis-stack:
     image: redis/redis-stack
     ports:
-      - "6379:6379"
       - "8001:8001"
     volumes:
       - redis-data:/data
+    networks:
+      - ragserver-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -46,18 +49,18 @@ services:
       ARK_BASE_URL: "${ARK_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}"
       ARK_API_KEY: "${ARK_API_KEY:-}"
       EMBEDDING_MODEL: "${EMBEDDING_MODEL:-text-embedding-3-small}"
-      EMBEDDING_DIMENSION: "${EMBEDDING_DIMENSION:-1536}"
+      EMBEDDING_DIMENSION: "${EMBEDDING_DIMENSION:-2024}"
       INDEX_TIMEOUT_SECONDS: "${INDEX_TIMEOUT_SECONDS:-300}"
       JWT_SECRET: "${JWT_SECRET:-dev-jwt-secret-change-me}"
       JWT_EXPIRES_HOURS: "${JWT_EXPIRES_HOURS:-24}"
       API_KEY_ENCRYPTION_SECRET: "${API_KEY_ENCRYPTION_SECRET:-change-me-in-production}"
       MCP_UPLOAD_MAX_MB: "20"
       MCP_TMP_DIR: "/data/tmp/mcp"
-    ports:
-      - "8080:8080"
     volumes:
       - ../storage/files:/data/files
       - ../storage/tmp:/data/tmp
+    networks:
+      - ragserver-net
     depends_on:
       mysql:
         condition: service_healthy
@@ -79,6 +82,8 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - ragserver-net
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
       interval: 10s
@@ -89,3 +94,7 @@ services:
 volumes:
   mysql-data:
   redis-data:
+
+networks:
+  ragserver-net:
+    driver: bridge

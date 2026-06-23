@@ -30,8 +30,8 @@ type Config struct {
 func Load() Config {
 	return Config{
 		ServerAddr:             getenv("SERVER_ADDR", ":8080"),
-		MySQLDSN:               getenv("MYSQL_DSN", "rag:ragpass@tcp(127.0.0.1:3306)/ragserver?charset=utf8mb4&parseTime=True&loc=Local"),
-		RedisAddr:              getenv("REDIS_ADDR", "127.0.0.1:6379"),
+		MySQLDSN:               getenv("MYSQL_DSN", "rag:ragpass@tcp(mysql:3306)/ragserver?charset=utf8mb4&parseTime=True&loc=Local"),
+		RedisAddr:              getenv("REDIS_ADDR", "redis-stack:6379"),
 		RedisPassword:          getenv("REDIS_PASSWORD", ""),
 		RedisDB:                getenvInt("REDIS_DB", 0),
 		FileStorageDir:         getenv("FILE_STORAGE_DIR", "../storage/files"),

@@ -1,4 +1,5 @@
 backend/.env
+deploy/.env
 backend/server
 backend/server.exe
 frontend/node_modules/
