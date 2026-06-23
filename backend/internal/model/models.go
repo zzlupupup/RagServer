@@ -11,6 +11,12 @@ const (
 	StatusActive   = "active"
 	StatusDisabled = "disabled"
 
+	RoleTeacher = "teacher"
+	RoleStudent = "student"
+
+	VisibilityPublic  = "public"
+	VisibilityPrivate = "private"
+
 	IndexPending  = "pending"
 	IndexIndexing = "indexing"
 	IndexIndexed  = "indexed"
@@ -26,10 +32,25 @@ const (
 	JobFailed    = "failed"
 )
 
+type User struct {
+	ID           uint64         `gorm:"primaryKey" json:"id"`
+	Email        string         `gorm:"size:255;uniqueIndex;not null" json:"email"`
+	PasswordHash string         `gorm:"size:255;not null" json:"-"`
+	DisplayName  string         `gorm:"size:128;not null" json:"display_name"`
+	Role         string         `gorm:"size:32;not null" json:"role"`
+	Status       string         `gorm:"size:32;not null;default:active" json:"status"`
+	LastLoginAt  *time.Time     `json:"last_login_at"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
 type KnowledgeBase struct {
 	ID          uint64         `gorm:"primaryKey" json:"id"`
+	OwnerUserID uint64         `gorm:"index;not null" json:"owner_user_id"`
 	Name        string         `gorm:"size:128;not null" json:"name"`
 	Description string         `gorm:"type:text" json:"description"`
+	Visibility  string         `gorm:"size:32;index;not null" json:"visibility"`
 	Status      string         `gorm:"size:32;not null;default:active" json:"status"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
@@ -39,6 +60,7 @@ type KnowledgeBase struct {
 type Document struct {
 	ID               uint64         `gorm:"primaryKey" json:"id"`
 	KBID             uint64         `gorm:"index;not null" json:"kb_id"`
+	UploadedByUserID uint64         `gorm:"index;not null" json:"uploaded_by_user_id"`
 	Filename         string         `gorm:"size:255;not null" json:"filename"`
 	OriginalFilename string         `gorm:"size:255;not null" json:"original_filename"`
 	FileExt          string         `gorm:"size:32;not null" json:"file_ext"`
@@ -69,26 +91,29 @@ type DocumentChunk struct {
 }
 
 type IngestionJob struct {
-	ID           uint64     `gorm:"primaryKey" json:"id"`
-	KBID         uint64     `gorm:"index;not null" json:"kb_id"`
-	DocumentID   uint64     `gorm:"index;not null" json:"document_id"`
-	JobType      string     `gorm:"size:32;not null" json:"job_type"`
-	Status       string     `gorm:"size:32;index;not null;default:pending" json:"status"`
-	ErrorMessage string     `gorm:"type:text" json:"error_message"`
-	StartedAt    *time.Time `json:"started_at"`
-	FinishedAt   *time.Time `json:"finished_at"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID              uint64     `gorm:"primaryKey" json:"id"`
+	KBID            uint64     `gorm:"index;not null" json:"kb_id"`
+	DocumentID      uint64     `gorm:"index;not null" json:"document_id"`
+	CreatedByUserID uint64     `gorm:"index;not null" json:"created_by_user_id"`
+	JobType         string     `gorm:"size:32;not null" json:"job_type"`
+	Status          string     `gorm:"size:32;index;not null;default:pending" json:"status"`
+	ErrorMessage    string     `gorm:"type:text" json:"error_message"`
+	StartedAt       *time.Time `json:"started_at"`
+	FinishedAt      *time.Time `json:"finished_at"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type APIKey struct {
-	ID           uint64         `gorm:"primaryKey" json:"id"`
-	Name         string         `gorm:"size:128;not null" json:"name"`
-	KeyHash      string         `gorm:"size:128;uniqueIndex;not null" json:"-"`
-	EncryptedKey string         `gorm:"type:text;not null" json:"-"`
-	Status       string         `gorm:"size:32;not null;default:active" json:"status"`
-	LastUsedAt   *time.Time     `json:"last_used_at"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+	ID              uint64         `gorm:"primaryKey" json:"id"`
+	CreatedByUserID uint64         `gorm:"index;not null" json:"created_by_user_id"`
+	BoundUserID     uint64         `gorm:"index;not null" json:"bound_user_id"`
+	Name            string         `gorm:"size:128;not null" json:"name"`
+	KeyHash         string         `gorm:"size:128;uniqueIndex;not null" json:"-"`
+	EncryptedKey    string         `gorm:"type:text;not null" json:"-"`
+	Status          string         `gorm:"size:32;not null;default:active" json:"status"`
+	LastUsedAt      *time.Time     `json:"last_used_at"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
 }

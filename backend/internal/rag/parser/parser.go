@@ -18,18 +18,26 @@ func New() *Parser {
 
 func (p *Parser) Parse(ctx context.Context, filename string, data []byte) ([]*schema.Document, error) {
 	ext := strings.ToLower(filepath.Ext(filename))
+	var (
+		docs []*schema.Document
+		err  error
+	)
 	switch ext {
 	case ".md", ".markdown":
-		return parseMarkdown(data), nil
+		docs = parseMarkdown(data)
 	case ".pdf":
-		return parsePDF(ctx, bytes.NewReader(data))
+		docs, err = parsePDF(ctx, bytes.NewReader(data))
 	case ".docx":
-		return parseDOCX(data)
+		docs, err = parseDOCX(data)
 	case ".doc":
 		return nil, fmt.Errorf(".doc files are not supported, please convert to .docx")
 	default:
 		return nil, fmt.Errorf("unsupported file type: %s", ext)
 	}
+	if err != nil {
+		return nil, err
+	}
+	return normalizeDocuments(ext, docs)
 }
 
 func SupportedExtension(filename string) bool {
@@ -39,4 +47,24 @@ func SupportedExtension(filename string) bool {
 	default:
 		return false
 	}
+}
+
+func normalizeDocuments(ext string, docs []*schema.Document) ([]*schema.Document, error) {
+	out := make([]*schema.Document, 0, len(docs))
+	for _, doc := range docs {
+		if doc == nil {
+			continue
+		}
+		content := strings.TrimSpace(doc.Content)
+		if content == "" {
+			continue
+		}
+		normalized := *doc
+		normalized.Content = content
+		out = append(out, &normalized)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s has no extractable text", strings.TrimPrefix(ext, "."))
+	}
+	return out, nil
 }

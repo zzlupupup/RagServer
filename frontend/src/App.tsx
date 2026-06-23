@@ -1,261 +1,353 @@
 import { useEffect, useMemo, useState } from 'react';
-import { KeyRound, Library, Plus, RefreshCw, Save, Trash2, Upload } from 'lucide-react';
-import { setAdminToken, getAdminToken } from './api/client';
+import { authApi } from './api/auth';
+import { clearAuthToken, getAuthToken, setAuthToken } from './api/client';
 import { knowledgeBasesApi } from './api/knowledgeBases';
 import { documentsApi } from './api/documents';
 import { apiKeysApi } from './api/apiKeys';
-import type { KnowledgeBase } from './types/knowledgeBase';
-import type { DocumentItem } from './types/document';
+import { usersApi } from './api/users';
 import type { ApiKey } from './types/apiKey';
+import type { DocumentItem } from './types/document';
+import type { KnowledgeBase } from './types/knowledgeBase';
+import type { PaginationState } from './types/pagination';
+import type { User, UserRole } from './types/user';
+import { messageOf, readStoredUser } from './lib/utils';
+import { Alert, ConfirmDialog } from './components/ui';
+import { AuthPage } from './components/AuthPage';
+import { Sidebar } from './components/Sidebar';
+import { DocumentsTable } from './components/DocumentsTable';
+import { ApiKeysTable } from './components/ApiKeysTable';
+
+type AuthMode = 'login' | 'register';
+const pageSize = 10;
 
 export function App() {
-  const [token, setToken] = useState(getAdminToken());
+  const [token, setToken] = useState(getAuthToken());
+  const [user, setUser] = useState<User | null>(() => readStoredUser());
+  const [authMode, setAuthMode] = useState<AuthMode>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [role, setRole] = useState<UserRole>('student');
+
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [documentPagination, setDocumentPagination] = useState<PaginationState>({ page: 1, pageSize, total: 0 });
+  const [apiKeyPagination, setApiKeyPagination] = useState<PaginationState>({ page: 1, pageSize, total: 0 });
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
   const [newKbName, setNewKbName] = useState('');
-  const [newKbDescription, setNewKbDescription] = useState('');
-  const [keyName, setKeyName] = useState('');
-  const [revealedKey, setRevealedKey] = useState('');
+  const [confirm, setConfirm] = useState<{ kind: 'kb' | 'doc' | 'key'; doc?: DocumentItem; key?: ApiKey } | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const selected = useMemo(() => kbs.find((kb) => kb.id === selectedId) || null, [kbs, selectedId]);
+  const isTeacher = user?.role === 'teacher';
+  const hasPending = useMemo(
+    () => documents.some((d) => d.index_status === 'pending' || d.index_status === 'indexing'),
+    [documents],
+  );
 
-  async function loadAll() {
-    if (!token) return;
+  useEffect(() => {
+    const onUnauthorized = () => signOut();
+    window.addEventListener('ragserver:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('ragserver:unauthorized', onUnauthorized);
+  }, []);
+
+  useEffect(() => {
+    if (token && user) void loadAll();
+  }, [token, user?.id]);
+
+  // Auto-refresh documents while any are in a non-terminal index status.
+  useEffect(() => {
+    if (!token || !user || !selectedId || !hasPending) return;
+    const timer = setInterval(async () => {
+      try {
+        await loadDocuments(selectedId, documentPagination.page);
+        const kbList = await knowledgeBasesApi.list();
+        setKbs(kbList);
+      } catch {
+        /* ignore polling errors */
+      }
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [token, user?.id, selectedId, hasPending, documentPagination.page]);
+
+  async function loadDocuments(kbId: number | null, page = documentPagination.page) {
+    if (!kbId) {
+      setDocuments([]);
+      setDocumentPagination({ page: 1, pageSize, total: 0 });
+      return;
+    }
+    const resp = await documentsApi.list(kbId, page, pageSize);
+    setDocuments(resp.items);
+    setDocumentPagination({ page: resp.page, pageSize: resp.page_size, total: resp.total });
+  }
+
+  async function loadApiKeys(page = apiKeyPagination.page) {
+    const resp = await apiKeysApi.list(page, pageSize);
+    setApiKeys(resp.items);
+    setApiKeyPagination({ page: resp.page, pageSize: resp.page_size, total: resp.total });
+  }
+
+  async function loadAll(nextSelectedId = selectedId) {
+    if (!token || !user) return;
     try {
       setError('');
-      const [kbList, keyList] = await Promise.all([knowledgeBasesApi.list(), apiKeysApi.list()]);
+      const kbList = await knowledgeBasesApi.list();
       setKbs(kbList);
-      setApiKeys(keyList);
-      const nextSelected = selectedId || kbList[0]?.id || null;
-      setSelectedId(nextSelected);
-      if (nextSelected) setDocuments(await documentsApi.list(nextSelected));
+      const nextId = nextSelectedId && kbList.some((kb) => kb.id === nextSelectedId) ? nextSelectedId : kbList[0]?.id || null;
+      setSelectedId(nextId);
+      await loadDocuments(nextId, nextId === selectedId ? documentPagination.page : 1);
+
+      if (user.role === 'teacher') {
+        const [_, userList] = await Promise.all([loadApiKeys(), usersApi.list()]);
+        setUsers(userList);
+      } else {
+        setApiKeys([]);
+        setUsers([]);
+        setApiKeyPagination({ page: 1, pageSize, total: 0 });
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败');
+      setError(messageOf(err, '加载失败'));
     }
   }
 
-  useEffect(() => {
-    void loadAll();
-  }, [token]);
+  async function submitAuth() {
+    try {
+      setError('');
+      setNotice('');
+      if (authMode === 'register') {
+        await authApi.register({ email, password, display_name: displayName, role });
+        setNotice('注册成功,请登录。');
+        setAuthMode('login');
+        return;
+      }
+      const resp = await authApi.login({ email, password });
+      setAuthToken(resp.token);
+      localStorage.setItem('ragserver_user', JSON.stringify(resp.user));
+      setToken(resp.token);
+      setUser(resp.user);
+    } catch (err) {
+      setError(messageOf(err, '认证失败'));
+    }
+  }
+
+  function signOut() {
+    clearAuthToken();
+    localStorage.removeItem('ragserver_user');
+    setToken('');
+    setUser(null);
+    setKbs([]);
+    setDocuments([]);
+    setApiKeys([]);
+    setUsers([]);
+    setSelectedId(null);
+  }
 
   async function createKb() {
     if (!newKbName.trim()) return;
-    const kb = await knowledgeBasesApi.create({ name: newKbName, description: newKbDescription });
-    setNewKbName('');
-    setNewKbDescription('');
-    setSelectedId(kb.id);
-    await loadAll();
+    try {
+      setError('');
+      const kb = await knowledgeBasesApi.create({ name: newKbName });
+      setNewKbName('');
+      await loadAll(kb.id);
+    } catch (err) {
+      setError(messageOf(err, '创建知识库失败'));
+    }
+  }
+
+  function editSelected(patch: Partial<KnowledgeBase>) {
+    if (!selected) return;
+    setKbs(kbs.map((kb) => (kb.id === selected.id ? { ...kb, ...patch } : kb)));
   }
 
   async function saveKb() {
     if (!selected) return;
-    await knowledgeBasesApi.update(selected.id, { name: selected.name, description: selected.description });
-    await loadAll();
+    try {
+      setError('');
+      await knowledgeBasesApi.update(selected.id, { name: selected.name });
+      await loadAll(selected.id);
+    } catch (err) {
+      setError(messageOf(err, '保存失败'));
+    }
+  }
+
+  async function deleteKb() {
+    if (!selected) return;
+    setConfirm({ kind: 'kb' });
+  }
+
+  async function confirmDelete() {
+    if (!confirm) return;
+    setConfirming(true);
+    try {
+      setError('');
+      if (confirm.kind === 'kb') {
+        if (!selected) return;
+        await knowledgeBasesApi.remove(selected.id);
+        await loadAll(null);
+      } else if (confirm.kind === 'doc' && confirm.doc) {
+        await documentsApi.remove(confirm.doc.id);
+        if (selected) await loadDocuments(selected.id, documentPagination.page);
+      } else if (confirm.kind === 'key' && confirm.key) {
+        await apiKeysApi.remove(confirm.key.id);
+        await loadApiKeys(apiKeyPagination.page);
+      }
+      setConfirm(null);
+    } catch (err) {
+      setError(messageOf(err, '删除失败'));
+    } finally {
+      setConfirming(false);
+    }
   }
 
   async function upload(file?: File) {
     if (!selected || !file) return;
-    await documentsApi.upload(selected.id, file);
-    setDocuments(await documentsApi.list(selected.id));
-    await loadAll();
+    try {
+      setError('');
+      await documentsApi.upload(selected.id, file);
+      setDocumentPagination((prev) => ({ ...prev, page: 1 }));
+      await Promise.all([loadDocuments(selected.id, 1), knowledgeBasesApi.list().then(setKbs)]);
+    } catch (err) {
+      setError(messageOf(err, '上传失败'));
+    }
   }
 
-  async function createKey() {
-    if (!keyName.trim()) return;
-    const created = await apiKeysApi.create(keyName);
-    setKeyName('');
-    setRevealedKey(created.api_key || '');
-    await loadAll();
+  async function deleteDocument(doc: DocumentItem) {
+    setConfirm({ kind: 'doc', doc });
+  }
+
+  async function toggleKb(kb: KnowledgeBase) {
+    if (selectedId === kb.id) {
+      setSelectedId(null);
+      setDocuments([]);
+      setDocumentPagination({ page: 1, pageSize, total: 0 });
+      return;
+    }
+    setSelectedId(kb.id);
+    try {
+      await loadDocuments(kb.id, 1);
+    } catch (err) {
+      setError(messageOf(err, '加载文档失败'));
+    }
+  }
+
+  async function createKey(studentId: number) {
+    try {
+      setError('');
+      await apiKeysApi.create({ bound_user_id: studentId });
+      await loadApiKeys(1);
+    } catch (err) {
+      setError(messageOf(err, '创建密钥失败'));
+    }
+  }
+
+  async function disableKey(key: ApiKey) {
+    try {
+      setError('');
+      await apiKeysApi.disable(key.id);
+      await loadApiKeys(apiKeyPagination.page);
+    } catch (err) {
+      setError(messageOf(err, '禁用密钥失败'));
+    }
+  }
+
+  async function enableKey(key: ApiKey) {
+    try {
+      setError('');
+      await apiKeysApi.enable(key.id);
+      await loadApiKeys(apiKeyPagination.page);
+    } catch (err) {
+      setError(messageOf(err, '启用密钥失败'));
+    }
+  }
+
+  function deleteKey(key: ApiKey) {
+    setConfirm({ kind: 'key', key });
+  }
+
+  if (!token || !user) {
+    return (
+      <AuthPage
+        mode={authMode}
+        email={email}
+        password={password}
+        displayName={displayName}
+        role={role}
+        error={error}
+        notice={notice}
+        onMode={setAuthMode}
+        onEmail={setEmail}
+        onPassword={setPassword}
+        onDisplayName={setDisplayName}
+        onRole={setRole}
+        onSubmit={submitAuth}
+      />
+    );
   }
 
   return (
     <main className="shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <Library size={22} />
-          <span>RagServer</span>
-        </div>
-        <label className="field">
-          <span>Admin Token</span>
-          <input
-            value={token}
-            type="password"
-            onChange={(event) => {
-              setToken(event.target.value);
-              setAdminToken(event.target.value);
-            }}
-            placeholder="输入 ADMIN_TOKEN"
+      <Sidebar
+        user={user}
+        kbs={kbs}
+        selectedId={selectedId}
+        newKbName={newKbName}
+        onNewName={setNewKbName}
+        onCreate={createKb}
+        onSignOut={signOut}
+        onToggle={(kb) => void toggleKb(kb)}
+        onEdit={editSelected}
+        onSave={saveKb}
+        onDelete={deleteKb}
+      />
+
+      <section className={`content ${isTeacher ? 'teacher-content' : 'student-content'}`}>
+        {error && <Alert tone="error">{error}</Alert>}
+
+        <DocumentsTable
+          documents={documents}
+          canUpload={!!selected}
+          onUpload={(file) => void upload(file)}
+          onDelete={(doc) => void deleteDocument(doc)}
+          pagination={documentPagination}
+          onPage={(page) => selectedId && void loadDocuments(selectedId, page)}
+        />
+
+        {isTeacher && (
+          <ApiKeysTable
+            apiKeys={apiKeys}
+            users={users}
+            onCreate={(studentId) => void createKey(studentId)}
+            onDisable={(key) => void disableKey(key)}
+            onEnable={(key) => void enableKey(key)}
+            onDelete={(key) => deleteKey(key)}
+            pagination={apiKeyPagination}
+            onPage={(page) => void loadApiKeys(page)}
           />
-        </label>
-        <button className="button" onClick={loadAll}>
-          <RefreshCw size={16} />
-          刷新
-        </button>
-        <nav className="kb-list">
-          {kbs.map((kb) => (
-            <button
-              className={kb.id === selectedId ? 'kb-item active' : 'kb-item'}
-              key={kb.id}
-              onClick={async () => {
-                setSelectedId(kb.id);
-                setDocuments(await documentsApi.list(kb.id));
-              }}
-            >
-              <strong>{kb.name}</strong>
-              <span>{kb.document_count} 个文档</span>
-            </button>
-          ))}
-        </nav>
-      </aside>
-
-      <section className="content">
-        {error && <div className="error">{error}</div>}
-
-        <section className="panel">
-          <div className="panel-title">
-            <h2>知识库</h2>
-            <button className="icon-button" onClick={createKb} title="创建知识库">
-              <Plus size={18} />
-            </button>
-          </div>
-          <div className="form-grid">
-            <input value={newKbName} onChange={(e) => setNewKbName(e.target.value)} placeholder="新知识库名称" />
-            <input value={newKbDescription} onChange={(e) => setNewKbDescription(e.target.value)} placeholder="描述" />
-          </div>
-
-          {selected && (
-            <div className="detail">
-              <input
-                value={selected.name}
-                onChange={(e) => setKbs(kbs.map((kb) => (kb.id === selected.id ? { ...kb, name: e.target.value } : kb)))}
-              />
-              <textarea
-                value={selected.description}
-                onChange={(e) =>
-                  setKbs(kbs.map((kb) => (kb.id === selected.id ? { ...kb, description: e.target.value } : kb)))
-                }
-              />
-              <div className="actions">
-                <button className="button" onClick={saveKb}>
-                  <Save size={16} />
-                  保存
-                </button>
-                <button
-                  className="button danger"
-                  onClick={async () => {
-                    await knowledgeBasesApi.remove(selected.id);
-                    setSelectedId(null);
-                    await loadAll();
-                  }}
-                >
-                  <Trash2 size={16} />
-                  删除
-                </button>
-              </div>
-            </div>
-          )}
-        </section>
-
-        <section className="panel">
-          <div className="panel-title">
-            <h2>文档</h2>
-            <label className="upload">
-              <Upload size={16} />
-              上传
-              <input
-                type="file"
-                accept=".pdf,.md,.markdown,.docx"
-                onChange={(event) => void upload(event.target.files?.[0])}
-              />
-            </label>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>文件</th>
-                <th>状态</th>
-                <th>分块</th>
-                <th>大小</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {documents.map((doc) => (
-                <tr key={doc.id}>
-                  <td>{doc.original_filename}</td>
-                  <td>
-                    <span className={`badge ${doc.index_status}`}>{doc.index_status}</span>
-                    {doc.index_error && <small>{doc.index_error}</small>}
-                  </td>
-                  <td>{doc.chunk_count}</td>
-                  <td>{Math.ceil(doc.file_size / 1024)} KB</td>
-                  <td>
-                    <button
-                      className="icon-button danger"
-                      title="删除文档"
-                      onClick={async () => {
-                        await documentsApi.remove(doc.id);
-                        if (selected) setDocuments(await documentsApi.list(selected.id));
-                      }}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-
-        <section className="panel">
-          <div className="panel-title">
-            <h2>API Key</h2>
-            <KeyRound size={18} />
-          </div>
-          <div className="form-grid">
-            <input value={keyName} onChange={(e) => setKeyName(e.target.value)} placeholder="Key 名称" />
-            <button className="button" onClick={createKey}>
-              <Plus size={16} />
-              生成
-            </button>
-          </div>
-          {revealedKey && <code className="secret">{revealedKey}</code>}
-          <table>
-            <thead>
-              <tr>
-                <th>名称</th>
-                <th>状态</th>
-                <th>最近使用</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {apiKeys.map((key) => (
-                <tr key={key.id}>
-                  <td>{key.name}</td>
-                  <td><span className={`badge ${key.status}`}>{key.status}</span></td>
-                  <td>{key.last_used_at || '-'}</td>
-                  <td className="row-actions">
-                    <button className="button" onClick={async () => setRevealedKey((await apiKeysApi.reveal(key.id)).api_key)}>
-                      查看
-                    </button>
-                    <button className="button" onClick={async () => { await apiKeysApi.disable(key.id); await loadAll(); }}>
-                      禁用
-                    </button>
-                    <button className="icon-button danger" onClick={async () => { await apiKeysApi.remove(key.id); await loadAll(); }}>
-                      <Trash2 size={16} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
+        )}
       </section>
+
+      <ConfirmDialog
+        open={!!confirm}
+        loading={confirming}
+        title={confirm?.kind === 'kb' ? '删除知识库' : confirm?.kind === 'key' ? '删除密钥' : '删除文档'}
+        confirmText="删除"
+        message={
+          confirm?.kind === 'kb' && selected
+            ? `确定删除知识库「${selected.name}」吗?该操作不可撤销,且会一并删除其中的所有文档。`
+            : confirm?.kind === 'doc' && confirm.doc
+              ? `确定删除文档「${confirm.doc.original_filename}」吗?此操作不可撤销。`
+              : confirm?.kind === 'key' && confirm.key
+                ? `确定删除为「${confirm.key.bound_user_display_name || `用户 #${confirm.key.bound_user_id}`}」签发的密钥吗?此操作不可撤销。`
+                : null
+        }
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setConfirm(null)}
+      />
     </main>
   );
 }
-

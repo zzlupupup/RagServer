@@ -8,6 +8,44 @@ import (
 	"ragserver/backend/internal/model"
 )
 
+type UserRepository struct {
+	db *gorm.DB
+}
+
+func NewUserRepository(db *gorm.DB) *UserRepository {
+	return &UserRepository{db: db}
+}
+
+func (r *UserRepository) Create(ctx context.Context, user *model.User) error {
+	return r.db.WithContext(ctx).Create(user).Error
+}
+
+func (r *UserRepository) Get(ctx context.Context, id uint64) (*model.User, error) {
+	var user model.User
+	if err := r.db.WithContext(ctx).First(&user, id).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*model.User, error) {
+	var user model.User
+	if err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *UserRepository) ListActive(ctx context.Context) ([]model.User, error) {
+	var users []model.User
+	err := r.db.WithContext(ctx).Where("status = ?", model.StatusActive).Order("id desc").Find(&users).Error
+	return users, err
+}
+
+func (r *UserRepository) Update(ctx context.Context, user *model.User) error {
+	return r.db.WithContext(ctx).Save(user).Error
+}
+
 type KnowledgeBaseRepository struct {
 	db *gorm.DB
 }
@@ -20,9 +58,12 @@ func (r *KnowledgeBaseRepository) Create(ctx context.Context, kb *model.Knowledg
 	return r.db.WithContext(ctx).Create(kb).Error
 }
 
-func (r *KnowledgeBaseRepository) List(ctx context.Context) ([]model.KnowledgeBase, error) {
+func (r *KnowledgeBaseRepository) ListVisible(ctx context.Context, userID uint64) ([]model.KnowledgeBase, error) {
 	var items []model.KnowledgeBase
-	err := r.db.WithContext(ctx).Order("id desc").Find(&items).Error
+	err := r.db.WithContext(ctx).
+		Where("visibility = ? OR owner_user_id = ?", model.VisibilityPublic, userID).
+		Order("id desc").
+		Find(&items).Error
 	return items, err
 }
 
@@ -32,6 +73,24 @@ func (r *KnowledgeBaseRepository) Get(ctx context.Context, id uint64) (*model.Kn
 		return nil, err
 	}
 	return &kb, nil
+}
+
+func (r *KnowledgeBaseRepository) GetVisible(ctx context.Context, id, userID uint64) (*model.KnowledgeBase, error) {
+	var kb model.KnowledgeBase
+	if err := r.db.WithContext(ctx).
+		Where("id = ? AND (visibility = ? OR owner_user_id = ?)", id, model.VisibilityPublic, userID).
+		First(&kb).Error; err != nil {
+		return nil, err
+	}
+	return &kb, nil
+}
+
+func (r *KnowledgeBaseRepository) FindVisibleByName(ctx context.Context, userID uint64, name string) ([]model.KnowledgeBase, error) {
+	var items []model.KnowledgeBase
+	err := r.db.WithContext(ctx).
+		Where("name = ? AND (visibility = ? OR owner_user_id = ?)", name, model.VisibilityPublic, userID).
+		Find(&items).Error
+	return items, err
 }
 
 func (r *KnowledgeBaseRepository) Update(ctx context.Context, kb *model.KnowledgeBase) error {
@@ -68,14 +127,29 @@ func (r *DocumentRepository) Get(ctx context.Context, id uint64) (*model.Documen
 	return &doc, nil
 }
 
-func (r *DocumentRepository) ListByKB(ctx context.Context, kbID uint64) ([]model.Document, error) {
+func (r *DocumentRepository) ListByKB(ctx context.Context, kbID uint64, page, pageSize int) ([]model.Document, int64, error) {
 	var items []model.Document
-	err := r.db.WithContext(ctx).Where("kb_id = ?", kbID).Order("id desc").Find(&items).Error
-	return items, err
+	var total int64
+	query := r.db.WithContext(ctx).Where("kb_id = ?", kbID)
+	if err := query.Model(&model.Document{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := query.Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error
+	return items, total, err
 }
 
 func (r *DocumentRepository) Update(ctx context.Context, doc *model.Document) error {
 	return r.db.WithContext(ctx).Save(doc).Error
+}
+
+func (r *DocumentRepository) FailStaleIndexing(ctx context.Context, olderThan time.Time, message string) error {
+	return r.db.WithContext(ctx).
+		Model(&model.Document{}).
+		Where("index_status = ? AND updated_at < ?", model.IndexIndexing, olderThan).
+		Updates(map[string]any{
+			"index_status": model.IndexFailed,
+			"index_error":  message,
+		}).Error
 }
 
 func (r *DocumentRepository) Delete(ctx context.Context, id uint64) error {
@@ -106,14 +180,6 @@ func (r *ChunkRepository) DeleteByDocument(ctx context.Context, documentID uint6
 	return r.db.WithContext(ctx).Where("document_id = ?", documentID).Delete(&model.DocumentChunk{}).Error
 }
 
-func (r *ChunkRepository) GetByRedisKey(ctx context.Context, redisKey string) (*model.DocumentChunk, error) {
-	var chunk model.DocumentChunk
-	if err := r.db.WithContext(ctx).Where("redis_key = ?", redisKey).First(&chunk).Error; err != nil {
-		return nil, err
-	}
-	return &chunk, nil
-}
-
 type IngestionJobRepository struct {
 	db *gorm.DB
 }
@@ -138,6 +204,18 @@ func (r *IngestionJobRepository) MarkFinished(ctx context.Context, job *model.In
 	return r.Update(ctx, job)
 }
 
+func (r *IngestionJobRepository) FailStaleRunning(ctx context.Context, olderThan time.Time, message string) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).
+		Model(&model.IngestionJob{}).
+		Where("status = ? AND updated_at < ?", model.JobRunning, olderThan).
+		Updates(map[string]any{
+			"status":        model.JobFailed,
+			"error_message": message,
+			"finished_at":   now,
+		}).Error
+}
+
 type APIKeyRepository struct {
 	db *gorm.DB
 }
@@ -150,15 +228,29 @@ func (r *APIKeyRepository) Create(ctx context.Context, key *model.APIKey) error 
 	return r.db.WithContext(ctx).Create(key).Error
 }
 
-func (r *APIKeyRepository) List(ctx context.Context) ([]model.APIKey, error) {
+func (r *APIKeyRepository) ListByCreator(ctx context.Context, creatorID uint64, page, pageSize int) ([]model.APIKey, int64, error) {
 	var items []model.APIKey
-	err := r.db.WithContext(ctx).Order("id desc").Find(&items).Error
-	return items, err
+	var total int64
+	query := r.db.WithContext(ctx).Where("created_by_user_id = ?", creatorID)
+	if err := query.Model(&model.APIKey{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := query.Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error
+	return items, total, err
 }
 
-func (r *APIKeyRepository) Get(ctx context.Context, id uint64) (*model.APIKey, error) {
+func (r *APIKeyRepository) ExistsByCreatorAndBoundUser(ctx context.Context, creatorID, boundUserID uint64) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&model.APIKey{}).
+		Where("created_by_user_id = ? AND bound_user_id = ?", creatorID, boundUserID).
+		Count(&count).Error
+	return count > 0, err
+}
+
+func (r *APIKeyRepository) GetByCreator(ctx context.Context, id, creatorID uint64) (*model.APIKey, error) {
 	var key model.APIKey
-	if err := r.db.WithContext(ctx).First(&key, id).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("id = ? AND created_by_user_id = ?", id, creatorID).First(&key).Error; err != nil {
 		return nil, err
 	}
 	return &key, nil

@@ -48,6 +48,9 @@ func (p *Pipeline) BuildChunks(ctx context.Context, doc model.Document, data []b
 		return nil, nil, err
 	}
 	chunks := p.splitter.Split(parsed)
+	if len(chunks) == 0 {
+		return nil, nil, fmt.Errorf("document has no extractable text chunks")
+	}
 	einoDocs := make([]*schema.Document, 0, len(chunks))
 	dbChunks := make([]model.DocumentChunk, 0, len(chunks))
 	for idx, chunk := range chunks {

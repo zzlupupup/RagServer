@@ -12,13 +12,19 @@ type Config struct {
 	RedisPassword          string
 	RedisDB                int
 	FileStorageDir         string
+	EmbeddingProvider      string
 	OpenAIBaseURL          string
 	OpenAIAPIKey           string
+	ArkBaseURL             string
+	ArkAPIKey              string
 	EmbeddingModel         string
 	EmbeddingDimension     int
-	AdminToken             string
+	IndexTimeoutSeconds    int
+	JWTSecret              string
+	JWTExpiresHours        int
 	APIKeyEncryptionSecret string
 	MCPUploadMaxMB         int
+	MCPTmpDir              string
 }
 
 func Load() Config {
@@ -29,13 +35,19 @@ func Load() Config {
 		RedisPassword:          getenv("REDIS_PASSWORD", ""),
 		RedisDB:                getenvInt("REDIS_DB", 0),
 		FileStorageDir:         getenv("FILE_STORAGE_DIR", "../storage/files"),
+		EmbeddingProvider:      getenv("EMBEDDING_PROVIDER", "ark"),
 		OpenAIBaseURL:          getenv("OPENAI_BASE_URL", "https://api.openai.com"),
 		OpenAIAPIKey:           getenv("OPENAI_API_KEY", ""),
-		EmbeddingModel:         getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
-		EmbeddingDimension:     getenvInt("EMBEDDING_DIMENSION", 1536),
-		AdminToken:             getenv("ADMIN_TOKEN", "dev-admin-token"),
+		ArkBaseURL:             getenv("ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
+		ArkAPIKey:              getenv("ARK_API_KEY", ""),
+		EmbeddingModel:         getenv("EMBEDDING_MODEL", ""),
+		EmbeddingDimension:     getenvInt("EMBEDDING_DIMENSION", 0),
+		IndexTimeoutSeconds:    getenvInt("INDEX_TIMEOUT_SECONDS", 300),
+		JWTSecret:              getenv("JWT_SECRET", "dev-jwt-secret-change-me"),
+		JWTExpiresHours:        getenvInt("JWT_EXPIRES_HOURS", 24),
 		APIKeyEncryptionSecret: getenv("API_KEY_ENCRYPTION_SECRET", "dev-secret-change-me-32-byte-value"),
 		MCPUploadMaxMB:         getenvInt("MCP_UPLOAD_MAX_MB", 20),
+		MCPTmpDir:              getenv("MCP_TMP_DIR", "../storage/tmp/mcp"),
 	}
 }
 

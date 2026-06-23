@@ -1,0 +1,53 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch Backend (Go)",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/backend/cmd/server",
+            "cwd": "${workspaceFolder}/backend",
+            "env": {
+                "SERVER_ADDR": ":8080",
+                "MYSQL_DSN": "rag:ragpass@tcp(127.0.0.1:3306)/ragserver?charset=utf8mb4&parseTime=True&loc=Local",
+                "REDIS_ADDR": "127.0.0.1:6379",
+                "REDIS_PASSWORD": "",
+                "REDIS_DB": "0",
+                "FILE_STORAGE_DIR": "../storage/files",
+                "EMBEDDING_PROVIDER": "ark",
+                "OPENAI_BASE_URL": "https://api.openai.com",
+                "OPENAI_API_KEY": "",
+                "ARK_BASE_URL": "https://ark.cn-beijing.volces.com/api/v3",
+                "ARK_API_KEY": "ark-7868d71b-860f-4859-a9d0-fd5902421b99-d10b5",
+                "EMBEDDING_MODEL": "ep-20260611205227-krftn",
+                "EMBEDDING_DIMENSION": "2048",
+                "INDEX_TIMEOUT_SECONDS": "300",
+                "JWT_SECRET": "dev-jwt-secret-change-me",
+                "JWT_EXPIRES_HOURS": "24",
+                "API_KEY_ENCRYPTION_SECRET": "dev-secret-change-me-32-byte-value",
+                "MCP_UPLOAD_MAX_MB": "20",
+                "MCP_TMP_DIR": "../storage/tmp/mcp"
+            }
+        },
+        {
+            "name": "Launch Frontend (Vite)",
+            "type": "node",
+            "request": "launch",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev"],
+            "cwd": "${workspaceFolder}/frontend",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Attach to Frontend (Chrome)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:5173",
+            "webRoot": "${workspaceFolder}/frontend/src",
+            "sourceMapPathOverrides": {
+                "webpack:///src/*": "${webRoot}/*"
+            }
+        }
+    ]
+}
