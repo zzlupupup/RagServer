@@ -70,7 +70,6 @@ export function DocumentsTable({
                   <Badge tone={statusTone(doc.index_status)} dot>
                     {labelOf(doc.index_status)}
                   </Badge>
-                  {doc.index_error && <small>{doc.index_error}</small>}
                 </td>
                 <td className="cell-center">{doc.chunk_count}</td>
                 <td className="cell-center cell-ellipsis">{doc.uploaded_by_user_display_name || `用户 #${doc.uploaded_by_user_id}`}</td>

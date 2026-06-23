@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { authApi } from './api/auth';
 import { clearAuthToken, getAuthToken, setAuthToken } from './api/client';
 import { knowledgeBasesApi } from './api/knowledgeBases';
@@ -10,8 +10,8 @@ import type { DocumentItem } from './types/document';
 import type { KnowledgeBase } from './types/knowledgeBase';
 import type { PaginationState } from './types/pagination';
 import type { User, UserRole } from './types/user';
-import { messageOf, readStoredUser } from './lib/utils';
-import { Alert, ConfirmDialog } from './components/ui';
+import { messageOf, readStoredUser, recognizedIndexError } from './lib/utils';
+import { Alert, AlertDialog, ConfirmDialog } from './components/ui';
 import { AuthPage } from './components/AuthPage';
 import { Sidebar } from './components/Sidebar';
 import { DocumentsTable } from './components/DocumentsTable';
@@ -42,6 +42,8 @@ export function App() {
   const [newKbName, setNewKbName] = useState('');
   const [confirm, setConfirm] = useState<{ kind: 'kb' | 'doc' | 'key'; doc?: DocumentItem; key?: ApiKey } | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [indexAlert, setIndexAlert] = useState<string | null>(null);
+  const alertedFailedRef = useRef<Set<number>>(new Set());
 
   const selected = useMemo(() => kbs.find((kb) => kb.id === selectedId) || null, [kbs, selectedId]);
   const isTeacher = user?.role === 'teacher';
@@ -74,6 +76,20 @@ export function App() {
     }, 3000);
     return () => clearInterval(timer);
   }, [token, user?.id, selectedId, hasPending, documentPagination.page]);
+
+  // Surface a popup when a document fails with a recognized indexing error
+  // (e.g. embedding service account overdue). Each failed doc is alerted once.
+  useEffect(() => {
+    if (!documents.length) return;
+    for (const doc of documents) {
+      if (doc.index_status !== 'failed' || alertedFailedRef.current.has(doc.id)) continue;
+      const message = recognizedIndexError(doc.index_error);
+      if (!message) continue;
+      alertedFailedRef.current.add(doc.id);
+      setIndexAlert(message);
+      return;
+    }
+  }, [documents]);
 
   async function loadDocuments(kbId: number | null, page = documentPagination.page) {
     if (!kbId) {
@@ -330,6 +346,13 @@ export function App() {
           />
         )}
       </section>
+
+      <AlertDialog
+        open={indexAlert !== null}
+        title="文档索引失败"
+        message={indexAlert}
+        onConfirm={() => setIndexAlert(null)}
+      />
 
       <ConfirmDialog
         open={!!confirm}

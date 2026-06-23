@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { AlertTriangle, Loader2, X } from 'lucide-react';
+import { AlertTriangle, Info, Loader2, X } from 'lucide-react';
 import type { Tone } from '../lib/utils';
 
 type ButtonVariant = 'primary' | 'default' | 'danger';
@@ -145,6 +145,41 @@ export function ConfirmDialog({
             {cancelText}
           </Button>
           <Button variant="danger" onClick={onConfirm} disabled={loading} icon={loading ? <Spinner size={15} /> : undefined}>
+            {confirmText}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function AlertDialog({
+  open,
+  title,
+  message,
+  confirmText = '知道了',
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  message: ReactNode;
+  confirmText?: string;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="dialog-overlay" onClick={onConfirm}>
+      <div className="dialog" onClick={(e) => e.stopPropagation()}>
+        <button className="dialog-close" onClick={onConfirm} title="关闭">
+          <X size={18} />
+        </button>
+        <div className="dialog-icon">
+          <Info size={22} />
+        </div>
+        <h3 className="dialog-title">{title}</h3>
+        <div className="dialog-message">{message}</div>
+        <div className="dialog-actions">
+          <Button variant="primary" onClick={onConfirm}>
             {confirmText}
           </Button>
         </div>
