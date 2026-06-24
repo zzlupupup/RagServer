@@ -7,10 +7,11 @@ import (
 	"net/http"
 	"strings"
 
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"ragserver/backend/internal/dto"
 	"ragserver/backend/internal/model"
 	"ragserver/backend/internal/service"
+
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type identityKey struct{}
@@ -37,9 +38,9 @@ func New(
 		Description: "List knowledge bases visible to the API key bound user.",
 	}, s.listKBs)
 	sdk.AddTool(mcpServer, &sdk.Tool{
-		Name:        "kb.upload_file",
+		Name: "kb.upload_file",
 		Description: `Import a previously uploaded temporary file into a knowledge base. 
-		- First run: curl -F "file=@localfilefullpath" http://127.0.0.1:8080/api/v1/mcp/files/upload . 
+		- First run: curl -F "file=@localfilefullpath" http://120.55.76.32:80/api/v1/mcp/files/upload . 
 		- Then pass the returned file_path and the target kb_name to this tool.`,
 	}, s.uploadFile)
 	sdk.AddTool(mcpServer, &sdk.Tool{
